@@ -115,13 +115,14 @@ async def reminder_checker(app):
                     InlineKeyboardButton("⏱ Через 1 час", callback_data=f"snooze_1h_{rid}"),
                     InlineKeyboardButton("⏱ Через 3 часа", callback_data=f"snooze_3h_{rid}"),
                     InlineKeyboardButton("⏱ До вечера", callback_data=f"snooze_eve_{rid}")
+                    InlineKeyboardButton("⏱ Отложить на сутки", callback_data=f"snooze_tom_{rid}")
                 ],
                 [
                     InlineKeyboardButton("✅ Прочитано", callback_data=f"ack_{rid}")
                 ]]
                 msg = await app.bot.send_message(uid, f"🔔 Напоминание: {text}", reply_markup=InlineKeyboardMarkup(kb))
                 logging.info(f"Напоминание отправлено пользователю {uid}: {text} (ID: {rid})")
-        await asyncio.sleep(10)
+        await asyncio.sleep(20)
 
 # =============== ACKNOWLEDGE (READ) ===============
 async def acknowledge_callback(update: Update, context: CallbackContext):
@@ -156,7 +157,7 @@ async def snooze_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
     parts = query.data.split("_")
-    mins = {"1h": 60, "3h": 180, "eve": (datetime.now(TIMEZONE).replace(hour=20, minute=0) - datetime.now(TIMEZONE)).seconds // 60}
+    mins = {"1h": 60, "3h": 180, "eve": (datetime.now(TIMEZONE).replace(hour=20, minute=0) - datetime.now(TIMEZONE)).seconds // 60, "tom": (datetime.now(TIMEZONE).replace(hour=9, minute=0) + timedelta(days=1) - datetime.now(TIMEZONE)).seconds // 60}
     offset = mins[parts[1]]
     rid = int(parts[2])
     new_time = datetime.now(TIMEZONE) + timedelta(minutes=offset)
