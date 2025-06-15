@@ -127,12 +127,16 @@ async def snooze_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
     parts = query.data.split("_")
-    mins = {"1h": 60, "3h": 180, "eve": (datetime.now(TIMEZONE).replace(hour=20, minute=0) - datetime.now(TIMEZONE)).seconds // 60}
+    mins = {
+        "1h": 60,
+        "3h": 180,
+        "eve": (datetime.now(TIMEZONE).replace(hour=20, minute=0) - datetime.now(TIMEZONE)).seconds // 60
+    }
     offset = mins[parts[1]]
     rid = int(parts[2])
-    c.execute("SELECT time FROM reminders WHERE id = ?", (rid,))
-    t = datetime.fromisoformat(c.fetchone()[0]) + timedelta(minutes=offset)
-    c.execute("UPDATE reminders SET time = ? WHERE id = ?", (t.isoformat(), rid))
+    
+    new_time = datetime.now(TIMEZONE) + timedelta(minutes=offset)
+    c.execute("UPDATE reminders SET time = ? WHERE id = ?", (new_time.isoformat(), rid))
     conn.commit()
     await query.edit_message_text("⏱ Напоминание отложено.")
 
