@@ -136,7 +136,7 @@ async def snooze_callback(update: Update, context: CallbackContext):
     await query.edit_message_text("⏱ Напоминание отложено.")
 
 # =============== MAIN ===============
-app = ApplicationBuilder().token(TOKEN).build()
+app = ApplicationBuilder().token(TOKEN).post_init(lambda app: asyncio.create_task(reminder_checker(app))).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("list", list_reminders))
 app.add_handler(CommandHandler("delete", delete_reminder))
@@ -146,7 +146,7 @@ conv = ConversationHandler(
     entry_points=[CommandHandler("new", new_reminder)],
     states={
         TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_text)],
-        TYPE: [CallbackQueryHandler(get_type)],
+        TYPE: [CallbackQueryHandler(get_type, pattern=r"^(once|weekly|monthly)$", block=False)],
         TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_time)],
     },
     fallbacks=[]
@@ -154,7 +154,6 @@ conv = ConversationHandler(
 app.add_handler(conv)
 
 # Background reminder checker
-app.job_queue.run_once(lambda c: asyncio.create_task(reminder_checker(app)), when=1)
 
 # Run bot
 app.run_polling()
