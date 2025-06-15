@@ -120,22 +120,8 @@ async def reminder_checker(app):
                     InlineKeyboardButton("✅ Прочитано", callback_data=f"ack_{rid}")
                 ]]
                 msg = await app.bot.send_message(uid, f"🔔 Напоминание: {text}", reply_markup=InlineKeyboardMarkup(kb))
-                
-                
-                if repeat == "weekly":
-                    new_time = dt + timedelta(days=7)
-                    c.execute("UPDATE reminders SET time = ?, next_time = ? WHERE id = ?", (new_time.isoformat(), new_time.isoformat(), rid))
-                elif repeat == "monthly":
-                    new_time = dt + timedelta(days=30)
-                    c.execute("UPDATE reminders SET time = ?, next_time = ? WHERE id = ?", (new_time.isoformat(), new_time.isoformat(), rid))
-                conn.commit()
+                logging.info(f"Напоминание отправлено пользователю {uid}: {text} (ID: {rid})")
         await asyncio.sleep(10)
-
-# =============== AUTO DELETE TASK ===============
-async def schedule_one_time_removal(reminder_id, delay=60):
-    await asyncio.sleep(delay)
-    c.execute("DELETE FROM reminders WHERE id = ? AND repeat = 'once'", (reminder_id,))
-    conn.commit()
 
 # =============== ACKNOWLEDGE (READ) ===============
 async def acknowledge_callback(update: Update, context: CallbackContext):
@@ -178,10 +164,6 @@ async def snooze_callback(update: Update, context: CallbackContext):
     conn.commit()
     await query.edit_message_text("⏱ Напоминание отложено.")
 
-    # отменить автоудаление если snooze выбран
-    if new_time:
-        # просто заново запланируем по новой дате
-        return
 
 # =============== MAIN ===============
 app = ApplicationBuilder().token(TOKEN).build()
