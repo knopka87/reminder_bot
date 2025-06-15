@@ -112,17 +112,19 @@ async def reminder_checker(app):
             if now >= next_dt:
                 # Отправляем напоминание и даём возможность отложить
                 kb = [[
-                    InlineKeyboardButton("Через 1 час", callback_data=f"snooze_1h_{rid}"),
-                    InlineKeyboardButton("Через 3 часа", callback_data=f"snooze_3h_{rid}"),
-                    InlineKeyboardButton("До вечера", callback_data=f"snooze_eve_{rid}")
+                    InlineKeyboardButton("⏱ Через 1 час", callback_data=f"snooze_1h_{rid}"),
+                    InlineKeyboardButton("⏱ Через 3 часа", callback_data=f"snooze_3h_{rid}"),
+                    InlineKeyboardButton("⏱ До вечера", callback_data=f"snooze_eve_{rid}")
+                ],
+                [
+                    InlineKeyboardButton("✅ Прочитано", callback_data=f"ack_{rid}")
                 ]]
                 msg = await app.bot.send_message(uid, f"🔔 Напоминание: {text}", reply_markup=InlineKeyboardMarkup(kb))
                 context = app.context_types.context()
                 context._chat_id = uid
                 context._message_id = msg.message_id
                 app.add_handler(CallbackQueryHandler(lambda u, c: schedule_one_time_removal(rid, delay=60), pattern=rf"^snooze_.*_{rid}$"))
-                if repeat == "once":
-                    asyncio.create_task(schedule_one_time_removal(rid, delay=60))
+                
                 if repeat == "weekly":
                     new_time = dt + timedelta(days=7)
                     c.execute("UPDATE reminders SET time = ?, next_time = ? WHERE id = ?", (new_time.isoformat(), new_time.isoformat(), rid))
@@ -136,6 +138,34 @@ async def reminder_checker(app):
 async def schedule_one_time_removal(reminder_id, delay=60):
     await asyncio.sleep(delay)
     c.execute("DELETE FROM reminders WHERE id = ? AND repeat = 'once'", (reminder_id,))
+    conn.commit()
+
+# =============== ACKNOWLEDGE (READ) ===============
+async def acknowledge_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    rid = int(query.data.split("_")[1])
+
+    c.execute("SELECT repeat, time FROM reminders WHERE id = ?", (rid,))
+    row = c.fetchone()
+    if not row:
+        await query.edit_message_text("🔕 Напоминание уже удалено.")
+        return
+
+    repeat, last_time = row
+    if repeat == "once":
+        c.execute("DELETE FROM reminders WHERE id = ?", (rid,))
+        await query.edit_message_text("🗑 Напоминание удалено.")
+    else:
+        dt = datetime.fromisoformat(last_time).astimezone(TIMEZONE)
+        if repeat == "weekly":
+            new_time = dt + timedelta(days=7)
+        elif repeat == "monthly":
+            new_time = dt + timedelta(days=30)
+        else:
+            new_time = dt
+        c.execute("UPDATE reminders SET time = ?, next_time = ? WHERE id = ?", (new_time.isoformat(), new_time.isoformat(), rid))
+        await query.edit_message_text("🔁 Напоминание перенесено на следующий период.")
     conn.commit()
 
 # =============== SNOOZE ===============
@@ -163,6 +193,7 @@ app.add_handler(CommandHandler("list", list_reminders))
 app.add_handler(CommandHandler("delete", delete_menu))
 app.add_handler(CallbackQueryHandler(delete_by_button, pattern=r"^del_"))
 app.add_handler(CallbackQueryHandler(snooze_callback, pattern=r"^snooze_"))
+app.add_handler(CallbackQueryHandler(acknowledge_callback, pattern=r"^ack_"))
 
 conv = ConversationHandler(
     entry_points=[CommandHandler("new", new_reminder)],
