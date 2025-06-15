@@ -120,10 +120,7 @@ async def reminder_checker(app):
                     InlineKeyboardButton("✅ Прочитано", callback_data=f"ack_{rid}")
                 ]]
                 msg = await app.bot.send_message(uid, f"🔔 Напоминание: {text}", reply_markup=InlineKeyboardMarkup(kb))
-                context = app.context_types.context()
-                context._chat_id = uid
-                context._message_id = msg.message_id
-                app.add_handler(CallbackQueryHandler(lambda u, c: schedule_one_time_removal(rid, delay=60), pattern=rf"^snooze_.*_{rid}$"))
+                
                 
                 if repeat == "weekly":
                     new_time = dt + timedelta(days=7)
