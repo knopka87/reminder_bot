@@ -137,7 +137,7 @@ async def snooze_callback(update: Update, context: CallbackContext):
     rid = int(parts[2])
     new_time = datetime.now(TIMEZONE) + timedelta(minutes=offset)
     c.execute("UPDATE reminders SET time = ? WHERE id = ?", (new_time.isoformat(), rid))
-        conn.commit()
+    conn.commit()
     await query.edit_message_text(f"⏱ Напоминание отложено. (id = {rid})")
 
 
