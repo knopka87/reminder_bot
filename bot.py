@@ -114,7 +114,7 @@ async def reminder_checker(app):
                 kb = [[
                     InlineKeyboardButton("⏱ Через 1 час", callback_data=f"snooze_1h_{rid}"),
                     InlineKeyboardButton("⏱ Через 3 часа", callback_data=f"snooze_3h_{rid}"),
-                    InlineKeyboardButton("⏱ До вечера", callback_data=f"snooze_eve_{rid}")
+                    InlineKeyboardButton("⏱ До вечера", callback_data=f"snooze_eve_{rid}"),
                     InlineKeyboardButton("⏱ Отложить на сутки", callback_data=f"snooze_tom_{rid}")
                 ],
                 [
