@@ -1,0 +1,10 @@
+services:
+  - type: worker
+    name: telegram-reminder-bot
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: python bot.py
+    envVars:
+      - key: TOKEN
+        sync: false
