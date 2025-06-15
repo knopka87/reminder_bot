@@ -156,7 +156,9 @@ app.add_handler(conv)
 # Background reminder checker
 
 async def main():
-    await reminder_checker(app)
+     # Запускаем reminder_checker параллельно
+    asyncio.create_task(reminder_checker(app))
+    # Запускаем бота
     await app.run_polling()
 
 if __name__ == "__main__":
