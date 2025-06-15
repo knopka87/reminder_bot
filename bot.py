@@ -84,17 +84,22 @@ async def list_reminders(update: Update, context: CallbackContext):
             msg += f"\n#{r[0]}: {r[1]} — {local_time.strftime('%d.%m.%Y %H:%M')} ({r[3]})"
         await update.message.reply_text(msg)
 
-async def delete_reminder(update: Update, context: CallbackContext):
-    if len(context.args) == 0:
-        await update.message.reply_text("Используйте: /delete <id>")
+async def delete_menu(update: Update, context: CallbackContext):
+    c.execute("SELECT id, text FROM reminders WHERE user_id = ?", (update.effective_user.id,))
+    rows = c.fetchall()
+    if not rows:
+        await update.message.reply_text("У вас нет активных напоминаний.")
         return
-    try:
-        rid = int(context.args[0])
-        c.execute("DELETE FROM reminders WHERE user_id = ? AND id = ?", (update.effective_user.id, rid))
-        conn.commit()
-        await update.message.reply_text("Удалено.")
-    except:
-        await update.message.reply_text("Ошибка при удалении. Убедитесь, что ID указан верно.")
+    keyboard = [[InlineKeyboardButton(f"❌ {r[1]}", callback_data=f"del_{r[0]}")] for r in rows]
+    await update.message.reply_text("Выберите напоминание для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def delete_by_button(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    rid = int(query.data.split("_")[1])
+    c.execute("DELETE FROM reminders WHERE user_id = ? AND id = ?", (query.from_user.id, rid))
+    conn.commit()
+    await query.edit_message_text("🗑 Напоминание удалено.")
 
 # =============== REMINDER CHECK LOOP ===============
 async def reminder_checker(app):
@@ -127,24 +132,21 @@ async def snooze_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
     parts = query.data.split("_")
-    mins = {
-        "1h": 60,
-        "3h": 180,
-        "eve": (datetime.now(TIMEZONE).replace(hour=20, minute=0) - datetime.now(TIMEZONE)).seconds // 60
-    }
+    mins = {"1h": 60, "3h": 180, "eve": (datetime.now(TIMEZONE).replace(hour=20, minute=0) - datetime.now(TIMEZONE)).seconds // 60}
     offset = mins[parts[1]]
     rid = int(parts[2])
-    
     new_time = datetime.now(TIMEZONE) + timedelta(minutes=offset)
     c.execute("UPDATE reminders SET time = ? WHERE id = ?", (new_time.isoformat(), rid))
-    conn.commit()
-    await query.edit_message_text("⏱ Напоминание отложено.")
+        conn.commit()
+    await query.edit_message_text(f"⏱ Напоминание отложено. (id = {rid})")
+
 
 # =============== MAIN ===============
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("list", list_reminders))
-app.add_handler(CommandHandler("delete", delete_reminder))
+app.add_handler(CommandHandler("delete", delete_menu))
+app.add_handler(CallbackQueryHandler(delete_by_button, pattern=r"^del_"))
 app.add_handler(CallbackQueryHandler(snooze_callback, pattern=r"^snooze_"))
 
 conv = ConversationHandler(
