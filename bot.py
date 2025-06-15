@@ -12,6 +12,7 @@ from telegram.ext import (ApplicationBuilder, CallbackContext, CommandHandler,
 
 import sqlite3
 import asyncio
+import nest_asyncio
 
 # =============== CONFIGURATION ===============
 TOKEN = os.environ.get("TOKEN")
@@ -160,4 +161,6 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
     asyncio.run(main())
