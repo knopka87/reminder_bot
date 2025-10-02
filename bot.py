@@ -9,7 +9,8 @@ import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (ApplicationBuilder, CallbackContext, CommandHandler,
                           CallbackQueryHandler, MessageHandler, filters, ConversationHandler)
-from aiohttp import web
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
 
 import sqlite3
 import asyncio
@@ -173,17 +174,28 @@ async def snooze_callback(update: Update, context: CallbackContext):
     await query.edit_message_text("⏱ Напоминание отложено.")
 
 # =============== HEALTH CHECK ===============
-async def health_check(request):
-    return web.Response(text="OK", status=200)
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"OK")
+        else:
+            self.send_response(404)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Not Found")
+            
+    def log_message(self, format, *args):
+        return  # Отключаем логирование HTTP запросов
 
-async def start_health_check():
-    app = web.Application()
-    app.router.add_get("/health", health_check)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8000)
-    await site.start()
-    return runner
+def start_health_check():
+    server = HTTPServer(('0.0.0.0', 8000), HealthCheckHandler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.daemon = True
+    thread.start()
+    return server
 
 # =============== MAIN ===============
 app = ApplicationBuilder().token(TOKEN).build()
@@ -208,11 +220,11 @@ app.add_handler(conv)
 # Background reminder checker
 if __name__ == "__main__":
     async def run():
+        # Запускаем health check сервер
+        health_server = start_health_check()
+        logging.info("Health check сервер запущен на порту 8080")
+        
         async with app:
-            # Запускаем health check сервер
-            health_runner = await start_health_check()
-            logging.info("Health check сервер запущен на порту 8000")
-            
             reminder_task = asyncio.create_task(reminder_checker(app))
             await app.start()
             await app.updater.start_polling()
@@ -229,7 +241,8 @@ if __name__ == "__main__":
                 except asyncio.CancelledError:
                     pass
                 await app.stop()
-                await health_runner.cleanup()  # Останавливаем health check сервер
+                health_server.shutdown()  # Останавливаем health check сервер
+                health_server.server_close()
                 logging.info("Бот остановлен")
 
     asyncio.run(run())
