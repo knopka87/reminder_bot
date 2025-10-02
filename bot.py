@@ -129,7 +129,7 @@ async def delete_menu(update: Update, context: CallbackContext):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, text FROM reminders WHERE user_id = ?", (update.effective_user.id,))
+        cur.execute("SELECT id, text FROM reminders WHERE user_id = %s", (update.effective_user.id,))
         rows = c.fetchall()
         if not rows:
             await update.message.reply_text("У вас нет активных напоминаний.")
@@ -147,7 +147,7 @@ async def delete_by_button(update: Update, context: CallbackContext):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        c.execute("DELETE FROM reminders WHERE user_id = ? AND id = ?", (query.from_user.id, rid))
+        cur.execute("DELETE FROM reminders WHERE user_id = %s AND id = %s", (query.from_user.id, rid))
         conn.commit()
         await query.edit_message_text("🗑 Напоминание удалено.")
     finally:
@@ -198,7 +198,7 @@ async def acknowledge_callback(update: Update, context: CallbackContext):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        c.execute("SELECT repeat, time FROM reminders WHERE id = ?", (rid,))
+        cur.execute("SELECT repeat, time FROM reminders WHERE id = %s", (rid,))
         row = c.fetchone()
         if not row:
             await query.edit_message_text("🔕 Напоминание уже удалено.")
@@ -206,7 +206,7 @@ async def acknowledge_callback(update: Update, context: CallbackContext):
 
         repeat, last_time = row
         if repeat == "once":
-            c.execute("DELETE FROM reminders WHERE id = ?", (rid,))
+            cur.execute("DELETE FROM reminders WHERE id = %s", (rid,))
             await query.edit_message_text("🗑 Напоминание удалено.")
         else:
             dt = datetime.fromisoformat(last_time).astimezone(TIMEZONE)
@@ -216,7 +216,7 @@ async def acknowledge_callback(update: Update, context: CallbackContext):
                 new_time = dt + timedelta(days=30)
             else:
                 new_time = dt
-            c.execute("UPDATE reminders SET time = ?, next_time = ? WHERE id = ?", (new_time.isoformat(), new_time.isoformat(), rid))
+            cur.execute("UPDATE reminders SET time = %s, next_time = %s WHERE id = %s", (new_time.isoformat(), new_time.isoformat(), rid))
             await query.edit_message_text("🔁 Напоминание перенесено на следующий период.")
         conn.commit()
     finally:
@@ -235,7 +235,7 @@ async def snooze_callback(update: Update, context: CallbackContext):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        c.execute("UPDATE reminders SET next_time = ? WHERE id = ?", (new_time.isoformat(), rid))
+        c.execute("UPDATE reminders SET next_time = %s WHERE id = %s", (new_time.isoformat(), rid))
         conn.commit()
         await query.edit_message_text("⏱ Напоминание отложено.")
     finally:
