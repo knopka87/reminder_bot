@@ -20,8 +20,8 @@ TIMEZONE = pytz.timezone("Europe/Moscow")
 # =============== DATABASE ===============
 conn = sqlite3.connect("reminders.db", check_same_thread=False)
 c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS reminders
-             (user_id INTEGER, text TEXT, time TEXT, next_time TEXT, repeat TEXT, id INTEGER PRIMARY KEY AUTOINCREMENT)''')
+c.execute("""CREATE TABLE IF NOT EXISTS reminders
+             (user_id INTEGER, text TEXT, time TEXT, next_time TEXT, repeat TEXT, id INTEGER PRIMARY KEY AUTOINCREMENT)""")
 conn.commit()
 
 # =============== LOGGER ===============
@@ -83,115 +83,13 @@ async def list_reminders(update: Update, context: CallbackContext):
             msg += f"\n#{r[0]}: {r[1]} — {local_time.strftime('%d.%m.%Y %H:%M')} ({r[3]})"
         await update.message.reply_text(msg)
 
-async def delete_menu(update: Update, context: CallbackContext):
-    c.execute("SELECT id, text FROM reminders WHERE user_id = ?", (update.effective_user.id,))
-    rows = c.fetchall()
-    if not rows:
-        await update.message.reply_text("У вас нет активных напоминаний.")
-        return
-    keyboard = [[InlineKeyboardButton(f"❌ {r[1]}", callback_data=f"del_{r[0]}")] for r in rows]
-    await update.message.reply_text("Выберите напоминание для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def delete_by_button(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    rid = int(query.data.split("_")[1])
-    c.execute("DELETE FROM reminders WHERE user_id = ? AND id = ?", (query.from_user.id, rid))
-    conn.commit()
-    await query.edit_message_text("🗑 Напоминание удалено.")
-
-# =============== REMINDER CHECK LOOP ===============
-async def reminder_checker(app):
-    while True:
-        now = datetime.now(TIMEZONE)
-        c.execute("SELECT id, user_id, text, time, next_time, repeat FROM reminders")
-        for rid, uid, text, t, next_t, repeat in c.fetchall():
-            dt = datetime.fromisoformat(t).astimezone(TIMEZONE)
-            next_dt = datetime.fromisoformat(next_t).astimezone(TIMEZONE)
-            if now >= next_dt:
-                # Отправляем напоминание и даём возможность отложить
-                kb = [[
-                    InlineKeyboardButton("⏱ Через 1 час", callback_data=f"snooze_1h_{rid}"),
-                    InlineKeyboardButton("⏱ Через 3 часа", callback_data=f"snooze_3h_{rid}"),
-                    InlineKeyboardButton("⏱ До вечера", callback_data=f"snooze_eve_{rid}"),
-                    InlineKeyboardButton("⏱ Отложить на сутки", callback_data=f"snooze_tom_{rid}")
-                ],
-                [
-                    InlineKeyboardButton("✅ Прочитано", callback_data=f"ack_{rid}")
-                ]]
-                msg = await app.bot.send_message(uid, f"🔔 Напоминание: {text}", reply_markup=InlineKeyboardMarkup(kb))
-                logging.info(f"Напоминание отправлено пользователю {uid}: {text} (ID: {rid})")
-        await asyncio.sleep(20)
-
-# =============== ACKNOWLEDGE (READ) ===============
-async def acknowledge_callback(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    rid = int(query.data.split("_")[1])
-
-    c.execute("SELECT repeat, time FROM reminders WHERE id = ?", (rid,))
-    row = c.fetchone()
-    if not row:
-        await query.edit_message_text("🔕 Напоминание уже удалено.")
-        return
-
-    repeat, last_time = row
-    if repeat == "once":
-        c.execute("DELETE FROM reminders WHERE id = ?", (rid,))
-        await query.edit_message_text("🗑 Напоминание удалено.")
-    else:
-        dt = datetime.fromisoformat(last_time).astimezone(TIMEZONE)
-        if repeat == "weekly":
-            new_time = dt + timedelta(days=7)
-        elif repeat == "monthly":
-            new_time = dt + timedelta(days=30)
-        else:
-            new_time = dt
-        c.execute("UPDATE reminders SET time = ?, next_time = ? WHERE id = ?", (new_time.isoformat(), new_time.isoformat(), rid))
-        await query.edit_message_text("🔁 Напоминание перенесено на следующий период.")
-    conn.commit()
-
-# =============== SNOOZE ===============
-async def snooze_callback(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    parts = query.data.split("_")
-    mins = {"1h": 60, "3h": 180, "eve": (datetime.now(TIMEZONE).replace(hour=20, minute=0) - datetime.now(TIMEZONE)).seconds // 60, "tom": (datetime.now(TIMEZONE).replace(hour=9, minute=0) + timedelta(days=1) - datetime.now(TIMEZONE)).seconds // 60}
-    offset = mins[parts[1]]
-    rid = int(parts[2])
-    new_time = datetime.now(TIMEZONE) + timedelta(minutes=offset)
-    c.execute("UPDATE reminders SET next_time = ? WHERE id = ?", (new_time.isoformat(), rid))
-    conn.commit()
-    await query.edit_message_text("⏱ Напоминание отложено.")
-
-
 # =============== MAIN ===============
 app = ApplicationBuilder().token(TOKEN).build()
+
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("list", list_reminders))
-app.add_handler(CommandHandler("delete", delete_menu))
-app.add_handler(CallbackQueryHandler(delete_by_button, pattern=r"^del_"))
-app.add_handler(CallbackQueryHandler(snooze_callback, pattern=r"^snooze_"))
-app.add_handler(CallbackQueryHandler(acknowledge_callback, pattern=r"^ack_"))
-
-conv = ConversationHandler(
-    entry_points=[CommandHandler("new", new_reminder)],
-    states={
-        TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_text)],
-        TYPE: [CallbackQueryHandler(get_type, pattern=r"^(once|weekly|monthly)$", block=False)],
-        TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_time)],
-    },
-    fallbacks=[]
-)
-app.add_handler(conv)
-
-# Background reminder checker
 
 if __name__ == "__main__":
-    import asyncio
-
-    async def run():
-        asyncio.create_task(reminder_checker(app))
-        await app.run_polling(close_loop=False)
-
-    asyncio.run(run())
+    loop = asyncio.get_event_loop()
+    loop.create_task(asyncio.sleep(1))  # заглушка
+    app.run_polling()
