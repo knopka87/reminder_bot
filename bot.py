@@ -203,7 +203,7 @@ async def acknowledge_callback(update: Update, context: CallbackContext):
         if not row:
             await query.edit_message_text("🔕 Напоминание уже удалено.")
             return
-    
+
         repeat, last_time = row
         if repeat == "once":
             c.execute("DELETE FROM reminders WHERE id = ?", (rid,))
@@ -219,7 +219,7 @@ async def acknowledge_callback(update: Update, context: CallbackContext):
             c.execute("UPDATE reminders SET time = ?, next_time = ? WHERE id = ?", (new_time.isoformat(), new_time.isoformat(), rid))
             await query.edit_message_text("🔁 Напоминание перенесено на следующий период.")
         conn.commit()
-    finally
+    finally:
         cur.close()
         conn.close()
 
