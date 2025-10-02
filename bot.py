@@ -12,7 +12,8 @@ from telegram.ext import (ApplicationBuilder, CallbackContext, CommandHandler,
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-import sqlite3
+import psycopg2
+from psycopg2.extras import DictCursor
 import asyncio
 
 # =============== CONFIGURATION ===============
@@ -20,11 +21,35 @@ TOKEN = os.environ.get("TOKEN")
 TIMEZONE = pytz.timezone("Europe/Moscow")
 
 # =============== DATABASE ===============
-conn = sqlite3.connect("reminders.db", check_same_thread=False)
-c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS reminders
-             (user_id INTEGER, text TEXT, time TEXT, next_time TEXT, repeat TEXT, id INTEGER PRIMARY KEY AUTOINCREMENT)''')
-conn.commit()
+DB_URL = os.environ.get("DB_URL")
+
+def get_db_connection():
+    return psycopg2.connect(DB_URL)
+
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        # Создаем таблицу, если она не существует
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS reminders (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                text TEXT,
+                time TIMESTAMP WITH TIME ZONE,
+                next_time TIMESTAMP WITH TIME ZONE,
+                repeat TEXT
+            )
+        ''')
+        conn.commit()
+    except Exception as e:
+        logging.error(f"Ошибка инициализации БД: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
+
+# Инициализируем БД при запуске
+init_db()
 
 # =============== LOGGER ===============
 logging.basicConfig(level=logging.INFO)
@@ -63,10 +88,19 @@ async def get_time(update: Update, context: CallbackContext):
         dt = datetime.strptime(update.message.text, "%d.%m.%Y %H:%M")
         dt = TIMEZONE.localize(dt)
         data = user_data_temp[update.effective_user.id]
-        c.execute("INSERT INTO reminders (user_id, text, time, next_time, repeat) VALUES (?, ?, ?, ?, ?)",
-                  (update.effective_user.id, data["text"], dt.isoformat(), dt.isoformat(), data["repeat"]))
-        conn.commit()
-        await update.message.reply_text("Напоминание добавлено!")
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "INSERT INTO reminders (user_id, text, time, next_time, repeat) VALUES (%s, %s, %s, %s, %s)",
+                (update.effective_user.id, data["text"], dt, dt, data["repeat"])
+            )
+            conn.commit()
+            await update.message.reply_text("Напоминание добавлено!")
+        finally:
+            cur.close()
+            conn.close()
     except Exception as e:
         await update.message.reply_text("Ошибка! Попробуйте снова с /new")
         logging.error(str(e))
@@ -74,59 +108,83 @@ async def get_time(update: Update, context: CallbackContext):
 
 # =============== LIST & DELETE ===============
 async def list_reminders(update: Update, context: CallbackContext):
-    c.execute("SELECT id, text, time, repeat FROM reminders WHERE user_id = ?", (update.effective_user.id,))
-    rows = c.fetchall()
-    if not rows:
-        await update.message.reply_text("У вас нет активных напоминаний.")
-    else:
-        msg = "Ваши напоминания:\n"
-        for r in rows:
-            local_time = datetime.fromisoformat(r[2]).astimezone(TIMEZONE)
-            msg += f"\n#{r[0]}: {r[1]} — {local_time.strftime('%d.%m.%Y %H:%M')} ({r[3]})"
-        await update.message.reply_text(msg)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, text, time, repeat FROM reminders WHERE user_id = %s", (update.effective_user.id,))
+        rows = cur.fetchall()
+        if not rows:
+            await update.message.reply_text("У вас нет активных напоминаний.")
+        else:
+            msg = "Ваши напоминания:\n"
+            for r in rows:
+                local_time = datetime.fromisoformat(r[2]).astimezone(TIMEZONE)
+                msg += f"\n#{r[0]}: {r[1]} — {local_time.strftime('%d.%m.%Y %H:%M')} ({r[3]})"
+            await update.message.reply_text(msg)
+    finally:
+        cur.close()
+        conn.close()
 
 async def delete_menu(update: Update, context: CallbackContext):
-    c.execute("SELECT id, text FROM reminders WHERE user_id = ?", (update.effective_user.id,))
-    rows = c.fetchall()
-    if not rows:
-        await update.message.reply_text("У вас нет активных напоминаний.")
-        return
-    keyboard = [[InlineKeyboardButton(f"❌ {r[1]}", callback_data=f"del_{r[0]}")] for r in rows]
-    await update.message.reply_text("Выберите напоминание для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, text FROM reminders WHERE user_id = ?", (update.effective_user.id,))
+        rows = c.fetchall()
+        if not rows:
+            await update.message.reply_text("У вас нет активных напоминаний.")
+            return
+        keyboard = [[InlineKeyboardButton(f"❌ {r[1]}", callback_data=f"del_{r[0]}")] for r in rows]
+        await update.message.reply_text("Выберите напоминание для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+    finally:
+        cur.close()
+        conn.close()
 
 async def delete_by_button(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
     rid = int(query.data.split("_")[1])
-    c.execute("DELETE FROM reminders WHERE user_id = ? AND id = ?", (query.from_user.id, rid))
-    conn.commit()
-    await query.edit_message_text("🗑 Напоминание удалено.")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        c.execute("DELETE FROM reminders WHERE user_id = ? AND id = ?", (query.from_user.id, rid))
+        conn.commit()
+        await query.edit_message_text("🗑 Напоминание удалено.")
+    finally:
+        cur.close()
+        conn.close()
 
 # =============== REMINDER CHECK LOOP ===============
 async def reminder_checker(app):
     while True:
         try:
             now = datetime.now(TIMEZONE)
-            c.execute("SELECT id, user_id, text, time, next_time, repeat FROM reminders")
-            for rid, uid, text, t, next_t, repeat in c.fetchall():
-                try:
-                    dt = datetime.fromisoformat(t).astimezone(TIMEZONE)
-                    next_dt = datetime.fromisoformat(next_t).astimezone(TIMEZONE)
-                    if now >= next_dt:
-                        kb = [[
-                            InlineKeyboardButton("⏱ 1 час", callback_data=f"snooze_1h_{rid}"),
-                            InlineKeyboardButton("⏱ 3 часа", callback_data=f"snooze_3h_{rid}"),
-                            InlineKeyboardButton("⏱ Вечер", callback_data=f"snooze_eve_{rid}"),
-                            InlineKeyboardButton("⏱ 24 часа", callback_data=f"snooze_tom_{rid}")
-                        ],
-                        [
-                            InlineKeyboardButton("✅ Прочитано", callback_data=f"ack_{rid}")
-                        ]]
-                        msg = await app.bot.send_message(uid, f"🔔 Напоминание: {text}", 
-                                                       reply_markup=InlineKeyboardMarkup(kb))
-                        logging.info(f"Напоминание отправлено пользователю {uid}: {text} (ID: {rid})")
-                except Exception as e:
-                    logging.error(f"Ошибка при обработке напоминания {rid}: {str(e)}")
+            conn = get_db_connection()
+            cur = conn.cursor()
+            try:
+                cur.execute("SELECT id, user_id, text, time, next_time, repeat FROM reminders")
+                for rid, uid, text, t, next_t, repeat in c.fetchall():
+                    try:
+                        dt = datetime.fromisoformat(t).astimezone(TIMEZONE)
+                        next_dt = datetime.fromisoformat(next_t).astimezone(TIMEZONE)
+                        if now >= next_dt:
+                            kb = [[
+                                InlineKeyboardButton("⏱ 1 час", callback_data=f"snooze_1h_{rid}"),
+                                InlineKeyboardButton("⏱ 3 часа", callback_data=f"snooze_3h_{rid}"),
+                                InlineKeyboardButton("⏱ Вечер", callback_data=f"snooze_eve_{rid}"),
+                                InlineKeyboardButton("⏱ 24 часа", callback_data=f"snooze_tom_{rid}")
+                            ],
+                            [
+                                InlineKeyboardButton("✅ Прочитано", callback_data=f"ack_{rid}")
+                            ]]
+                            msg = await app.bot.send_message(uid, f"🔔 Напоминание: {text}",
+                                                           reply_markup=InlineKeyboardMarkup(kb))
+                            logging.info(f"Напоминание отправлено пользователю {uid}: {text} (ID: {rid})")
+                    except Exception as e:
+                        logging.error(f"Ошибка при обработке напоминания {rid}: {str(e)}")
+            finally:
+                cur.close()
+                conn.close()
             await asyncio.sleep(20)
         except Exception as e:
             logging.error(f"Ошибка в цикле проверки напоминаний: {str(e)}")
@@ -137,28 +195,33 @@ async def acknowledge_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
     rid = int(query.data.split("_")[1])
-
-    c.execute("SELECT repeat, time FROM reminders WHERE id = ?", (rid,))
-    row = c.fetchone()
-    if not row:
-        await query.edit_message_text("🔕 Напоминание уже удалено.")
-        return
-
-    repeat, last_time = row
-    if repeat == "once":
-        c.execute("DELETE FROM reminders WHERE id = ?", (rid,))
-        await query.edit_message_text("🗑 Напоминание удалено.")
-    else:
-        dt = datetime.fromisoformat(last_time).astimezone(TIMEZONE)
-        if repeat == "weekly":
-            new_time = dt + timedelta(days=7)
-        elif repeat == "monthly":
-            new_time = dt + timedelta(days=30)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        c.execute("SELECT repeat, time FROM reminders WHERE id = ?", (rid,))
+        row = c.fetchone()
+        if not row:
+            await query.edit_message_text("🔕 Напоминание уже удалено.")
+            return
+    
+        repeat, last_time = row
+        if repeat == "once":
+            c.execute("DELETE FROM reminders WHERE id = ?", (rid,))
+            await query.edit_message_text("🗑 Напоминание удалено.")
         else:
-            new_time = dt
-        c.execute("UPDATE reminders SET time = ?, next_time = ? WHERE id = ?", (new_time.isoformat(), new_time.isoformat(), rid))
-        await query.edit_message_text("🔁 Напоминание перенесено на следующий период.")
-    conn.commit()
+            dt = datetime.fromisoformat(last_time).astimezone(TIMEZONE)
+            if repeat == "weekly":
+                new_time = dt + timedelta(days=7)
+            elif repeat == "monthly":
+                new_time = dt + timedelta(days=30)
+            else:
+                new_time = dt
+            c.execute("UPDATE reminders SET time = ?, next_time = ? WHERE id = ?", (new_time.isoformat(), new_time.isoformat(), rid))
+            await query.edit_message_text("🔁 Напоминание перенесено на следующий период.")
+        conn.commit()
+    finally
+        cur.close()
+        conn.close()
 
 # =============== SNOOZE ===============
 async def snooze_callback(update: Update, context: CallbackContext):
@@ -169,9 +232,15 @@ async def snooze_callback(update: Update, context: CallbackContext):
     offset = mins[parts[1]]
     rid = int(parts[2])
     new_time = datetime.now(TIMEZONE) + timedelta(minutes=offset)
-    c.execute("UPDATE reminders SET next_time = ? WHERE id = ?", (new_time.isoformat(), rid))
-    conn.commit()
-    await query.edit_message_text("⏱ Напоминание отложено.")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        c.execute("UPDATE reminders SET next_time = ? WHERE id = ?", (new_time.isoformat(), rid))
+        conn.commit()
+        await query.edit_message_text("⏱ Напоминание отложено.")
+    finally:
+        cur.close()
+        conn.close()
 
 # =============== HEALTH CHECK ===============
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -186,7 +255,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
             self.wfile.write(b"Not Found")
-            
+
     def log_message(self, format, *args):
         return  # Отключаем логирование HTTP запросов
 
@@ -223,7 +292,7 @@ if __name__ == "__main__":
         # Запускаем health check сервер
         health_server = start_health_check()
         logging.info("Health check сервер запущен на порту 8080")
-        
+
         async with app:
             reminder_task = asyncio.create_task(reminder_checker(app))
             await app.start()
