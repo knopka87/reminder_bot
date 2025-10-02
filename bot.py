@@ -12,7 +12,6 @@ from telegram.ext import (ApplicationBuilder, CallbackContext, CommandHandler,
 
 import sqlite3
 import asyncio
-import nest_asyncio
 
 # =============== CONFIGURATION ===============
 TOKEN = os.environ.get("TOKEN")
@@ -188,10 +187,11 @@ app.add_handler(conv)
 
 # Background reminder checker
 
-async def main():
-    asyncio.create_task(reminder_checker(app))
-    await app.run_polling()
-
 if __name__ == "__main__":
-    asyncio.get_event_loop().create_task(reminder_checker(app))
-    app.run_polling()
+    import asyncio
+
+    async def run():
+        asyncio.create_task(reminder_checker(app))
+        await app.run_polling(close_loop=False)
+
+    asyncio.run(run())
