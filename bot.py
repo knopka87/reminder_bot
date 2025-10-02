@@ -118,7 +118,7 @@ async def list_reminders(update: Update, context: CallbackContext):
         else:
             msg = "Ваши напоминания:\n"
             for r in rows:
-                local_time = datetime.fromisoformat(r[2]).astimezone(TIMEZONE)
+                local_time = r[2].astimezone(TIMEZONE)
                 msg += f"\n#{r[0]}: {r[1]} — {local_time.strftime('%d.%m.%Y %H:%M')} ({r[3]})"
             await update.message.reply_text(msg)
     finally:
@@ -165,8 +165,8 @@ async def reminder_checker(app):
                 cur.execute("SELECT id, user_id, text, time, next_time, repeat FROM reminders")
                 for rid, uid, text, t, next_t, repeat in cur.fetchall():
                     try:
-                        dt = datetime.fromisoformat(t).astimezone(TIMEZONE)
-                        next_dt = datetime.fromisoformat(next_t).astimezone(TIMEZONE)
+                        dt = t.astimezone(TIMEZONE)
+                        next_dt = next_t.astimezone(TIMEZONE)
                         if now >= next_dt:
                             kb = [[
                                 InlineKeyboardButton("⏱ 1 час", callback_data=f"snooze_1h_{rid}"),
@@ -297,7 +297,7 @@ if __name__ == "__main__":
             try:
                 # Попытка очистить предыдущие обновления
                 await app.bot.delete_webhook(drop_pending_updates=True)
-                
+
                 reminder_task = asyncio.create_task(reminder_checker(app))
                 await app.start()
                 await app.updater.start_polling(drop_pending_updates=True)
