@@ -130,7 +130,7 @@ async def delete_menu(update: Update, context: CallbackContext):
     cur = conn.cursor()
     try:
         cur.execute("SELECT id, text FROM reminders WHERE user_id = %s", (update.effective_user.id,))
-        rows = c.fetchall()
+        rows = cur.fetchall()
         if not rows:
             await update.message.reply_text("У вас нет активных напоминаний.")
             return
@@ -163,7 +163,7 @@ async def reminder_checker(app):
             cur = conn.cursor()
             try:
                 cur.execute("SELECT id, user_id, text, time, next_time, repeat FROM reminders")
-                for rid, uid, text, t, next_t, repeat in c.fetchall():
+                for rid, uid, text, t, next_t, repeat in cur.fetchall():
                     try:
                         dt = datetime.fromisoformat(t).astimezone(TIMEZONE)
                         next_dt = datetime.fromisoformat(next_t).astimezone(TIMEZONE)
@@ -199,7 +199,7 @@ async def acknowledge_callback(update: Update, context: CallbackContext):
     cur = conn.cursor()
     try:
         cur.execute("SELECT repeat, time FROM reminders WHERE id = %s", (rid,))
-        row = c.fetchone()
+        row = cur.fetchone()
         if not row:
             await query.edit_message_text("🔕 Напоминание уже удалено.")
             return
@@ -235,7 +235,7 @@ async def snooze_callback(update: Update, context: CallbackContext):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        c.execute("UPDATE reminders SET next_time = %s WHERE id = %s", (new_time.isoformat(), rid))
+        cur.execute("UPDATE reminders SET next_time = %s WHERE id = %s", (new_time.isoformat(), rid))
         conn.commit()
         await query.edit_message_text("⏱ Напоминание отложено.")
     finally:
@@ -294,24 +294,33 @@ if __name__ == "__main__":
         logging.info("Health check сервер запущен на порту 8000")
 
         async with app:
-            reminder_task = asyncio.create_task(reminder_checker(app))
-            await app.start()
-            await app.updater.start_polling()
-
             try:
-                stop = asyncio.Future()
-                await stop
-            except (KeyboardInterrupt, SystemExit):
-                logging.info("Получен сигнал завершения...")
-            finally:
-                reminder_task.cancel()
+                # Попытка очистить предыдущие обновления
+                await app.bot.delete_webhook(drop_pending_updates=True)
+                
+                reminder_task = asyncio.create_task(reminder_checker(app))
+                await app.start()
+                await app.updater.start_polling(drop_pending_updates=True)
+
                 try:
-                    await reminder_task
-                except asyncio.CancelledError:
-                    pass
-                await app.stop()
-                health_server.shutdown()  # Останавливаем health check сервер
+                    stop = asyncio.Future()
+                    await stop
+                except (KeyboardInterrupt, SystemExit):
+                    logging.info("Получен сигнал завершения...")
+                finally:
+                    reminder_task.cancel()
+                    try:
+                        await reminder_task
+                    except asyncio.CancelledError:
+                        pass
+                    await app.stop()
+                    health_server.shutdown()
+                    health_server.server_close()
+                    logging.info("Бот остановлен")
+            except Exception as e:
+                logging.error(f"Ошибка при запуске бота: {str(e)}")
+                health_server.shutdown()
                 health_server.server_close()
-                logging.info("Бот остановлен")
+                raise
 
     asyncio.run(run())
