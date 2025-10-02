@@ -9,6 +9,7 @@ import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (ApplicationBuilder, CallbackContext, CommandHandler,
                           CallbackQueryHandler, MessageHandler, filters, ConversationHandler)
+from aiohttp import web
 
 import sqlite3
 import asyncio
@@ -171,6 +172,18 @@ async def snooze_callback(update: Update, context: CallbackContext):
     conn.commit()
     await query.edit_message_text("⏱ Напоминание отложено.")
 
+# =============== HEALTH CHECK ===============
+async def health_check(request):
+    return web.Response(text="OK", status=200)
+
+async def start_health_check():
+    app = web.Application()
+    app.router.add_get("/health", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8000)
+    await site.start()
+    return runner
 
 # =============== MAIN ===============
 app = ApplicationBuilder().token(TOKEN).build()
@@ -193,16 +206,18 @@ conv = ConversationHandler(
 app.add_handler(conv)
 
 # Background reminder checker
-
 if __name__ == "__main__":
     async def run():
         async with app:
+            # Запускаем health check сервер
+            health_runner = await start_health_check()
+            logging.info("Health check сервер запущен на порту 8000")
+            
             reminder_task = asyncio.create_task(reminder_checker(app))
             await app.start()
             await app.updater.start_polling()
-            
+
             try:
-                # Ожидаем сигнала завершения
                 stop = asyncio.Future()
                 await stop
             except (KeyboardInterrupt, SystemExit):
@@ -214,6 +229,7 @@ if __name__ == "__main__":
                 except asyncio.CancelledError:
                     pass
                 await app.stop()
+                await health_runner.cleanup()  # Останавливаем health check сервер
                 logging.info("Бот остановлен")
 
     asyncio.run(run())
