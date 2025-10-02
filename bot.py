@@ -291,7 +291,7 @@ if __name__ == "__main__":
     async def run():
         # Запускаем health check сервер
         health_server = start_health_check()
-        logging.info("Health check сервер запущен на порту 8080")
+        logging.info("Health check сервер запущен на порту 8000")
 
         async with app:
             reminder_task = asyncio.create_task(reminder_checker(app))
