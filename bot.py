@@ -209,14 +209,14 @@ async def acknowledge_callback(update: Update, context: CallbackContext):
             cur.execute("DELETE FROM reminders WHERE id = %s", (rid,))
             await query.edit_message_text("🗑 Напоминание удалено.")
         else:
-            dt = datetime.fromisoformat(last_time).astimezone(TIMEZONE)
+            dt = last_time.astimezone(TIMEZONE)
             if repeat == "weekly":
                 new_time = dt + timedelta(days=7)
             elif repeat == "monthly":
                 new_time = dt + timedelta(days=30)
             else:
                 new_time = dt
-            cur.execute("UPDATE reminders SET time = %s, next_time = %s WHERE id = %s", (new_time.isoformat(), new_time.isoformat(), rid))
+            cur.execute("UPDATE reminders SET time = %s, next_time = %s WHERE id = %s", (new_time, new_time, rid))
             await query.edit_message_text("🔁 Напоминание перенесено на следующий период.")
         conn.commit()
     finally:
