@@ -114,10 +114,10 @@ async def reminder_checker(app):
                     next_dt = datetime.fromisoformat(next_t).astimezone(TIMEZONE)
                     if now >= next_dt:
                         kb = [[
-                            InlineKeyboardButton("⏱ Через 1 час", callback_data=f"snooze_1h_{rid}"),
-                            InlineKeyboardButton("⏱ Через 3 часа", callback_data=f"snooze_3h_{rid}"),
-                            InlineKeyboardButton("⏱ До вечера", callback_data=f"snooze_eve_{rid}"),
-                            InlineKeyboardButton("⏱ Отложить на сутки", callback_data=f"snooze_tom_{rid}")
+                            InlineKeyboardButton("⏱ 1 час", callback_data=f"snooze_1h_{rid}"),
+                            InlineKeyboardButton("⏱ 3 часа", callback_data=f"snooze_3h_{rid}"),
+                            InlineKeyboardButton("⏱ Вечер", callback_data=f"snooze_eve_{rid}"),
+                            InlineKeyboardButton("⏱ 24 часа", callback_data=f"snooze_tom_{rid}")
                         ],
                         [
                             InlineKeyboardButton("✅ Прочитано", callback_data=f"ack_{rid}")
